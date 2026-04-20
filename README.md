@@ -16,6 +16,16 @@ docker compose -f docker-compose.example.yml up --build
 
 The example stack includes BetterAutoHeal plus a sample `nginx` service with a healthcheck and the opt-in label.
 
+### Providing the Slack webhook URL
+
+The webhook URL is a secret, so the example compose file reads it from your shell (`${BAH_SLACK_WEBHOOK_URL:?...}`) and fails fast if it is not set. You have three reasonable options, in order of preference:
+
+1. **Shell env** — `export BAH_SLACK_WEBHOOK_URL=...` before running `docker compose up`. Nothing to commit, secret never lands on disk in the repo.
+2. **`.env` file next to the compose file** — create a file named `.env` with `BAH_SLACK_WEBHOOK_URL=https://hooks.slack.com/...`. Docker Compose loads it automatically. **Make sure `.env` is in `.gitignore`** (the repo's `.gitignore` already covers it).
+3. **Hard-code it in `docker-compose.yml`** — yes, you can put the literal URL under `services.betterautoheal.environment.BAH_SLACK_WEBHOOK_URL`. It works, but the compose file then contains a secret; only do this on private hosts and never commit that file to a public repo. Prefer options 1 or 2 for anything shared.
+
+For production, Docker secrets or your orchestrator's secret store (Swarm secrets, Kubernetes Secret, AWS SSM, etc.) is the right home for the webhook URL.
+
 ## Opting a container in
 
 Add labels to any container you want monitored:
@@ -76,6 +86,64 @@ go build ./...
 go test ./...
 docker build -t betterautoheal:dev .
 ```
+
+## Publishing the image
+
+Once you've smoke-tested locally and you want to ship the image to a registry so other hosts can pull it:
+
+### Docker Hub
+
+```bash
+# 1. Log in once per machine.
+docker login                                   # prompts for your Docker Hub username + PAT
+
+# 2. Tag the image you built. Replace YOURUSER with your Docker Hub namespace.
+docker build -t YOURUSER/betterautoheal:0.1.0 -t YOURUSER/betterautoheal:latest .
+
+# 3. Push both tags.
+docker push YOURUSER/betterautoheal:0.1.0
+docker push YOURUSER/betterautoheal:latest
+```
+
+Then point any consumer at the registry image in their compose file:
+
+```yaml
+services:
+  betterautoheal:
+    image: YOURUSER/betterautoheal:0.1.0      # instead of `build: .`
+    # ... same environment + volumes as the example
+```
+
+### GitHub Container Registry (`ghcr.io`)
+
+```bash
+# 1. Create a Personal Access Token with write:packages scope, then:
+echo "$GHCR_TOKEN" | docker login ghcr.io -u YOURGHUSER --password-stdin
+
+# 2. Tag with the ghcr.io namespace. Image names must be lowercase.
+docker build -t ghcr.io/YOURGHUSER/betterautoheal:0.1.0 .
+
+# 3. Push.
+docker push ghcr.io/YOURGHUSER/betterautoheal:0.1.0
+```
+
+### Private / self-hosted registry
+
+```bash
+docker build -t registry.example.com/tools/betterautoheal:0.1.0 .
+docker push registry.example.com/tools/betterautoheal:0.1.0
+```
+
+### Tagging conventions
+
+- Pin a specific version (`:0.1.0`) in production compose files so upgrades are explicit.
+- Keep a floating `:latest` if you want dev environments to follow `main`.
+- For multi-arch images (e.g. building on amd64 to deploy on an arm64 server) use `docker buildx`:
+
+  ```bash
+  docker buildx build --platform linux/amd64,linux/arm64 \
+    -t YOURUSER/betterautoheal:0.1.0 --push .
+  ```
 
 ## License
 
