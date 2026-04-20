@@ -1,0 +1,42 @@
+# Reference deployment for BetterAutoHeal.
+#
+# Adjust:
+#   * BAH_SLACK_WEBHOOK_URL  → your Slack Incoming Webhook URL
+#   * the bind mount under `volumes:` so that the *host* path of this
+#     compose project is mounted at the *same path* inside the autoheal
+#     container. That is required for `mode=compose` so that the docker
+#     compose plugin can find the compose file via the
+#     com.docker.compose.project.working_dir label.
+
+services:
+  betterautoheal:
+    build: .
+    image: betterautoheal:dev
+    restart: unless-stopped
+    environment:
+      BAH_INTERVAL: "5s"
+      BAH_DEFAULT_MODE: "restart"
+      BAH_LOG_LINES: "100"
+      BAH_NOTIFY: "true"
+      BAH_SLACK_WEBHOOK_URL: "${BAH_SLACK_WEBHOOK_URL:?set BAH_SLACK_WEBHOOK_URL in your env}"
+      BAH_SLACK_USERNAME: "BetterAutoHeal"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Bind the host project dir to the same path inside the container so
+      # `docker compose` can resolve project.working_dir for compose-mode services.
+      - ${PWD}:${PWD}:ro
+
+  # Sample monitored service. It uses `restart` mode by default — set
+  # betterautoheal.mode=compose to test compose mode end-to-end.
+  flaky:
+    image: nginx:alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/"]
+      interval: 5s
+      timeout: 2s
+      retries: 2
+      start_period: 5s
+    labels:
+      - betterautoheal.enable=true
+      - betterautoheal.mode=restart

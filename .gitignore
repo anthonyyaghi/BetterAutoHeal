@@ -1,0 +1,7 @@
+/betterautoheal
+*.exe
+*.test
+*.out
+.env
+.idea/
+.vscode/
