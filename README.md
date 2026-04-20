@@ -9,8 +9,17 @@ Docker container watchdog inspired by [`willfarrell/docker-autoheal`](https://gi
 
 ## Quick start
 
+The fastest path is the bundled installer — it checks prerequisites, creates a `.env` from `.env.example`, prompts for your Slack webhook, builds the image, and brings up the example stack:
+
 ```bash
-export BAH_SLACK_WEBHOOK_URL=https://hooks.slack.com/services/XXX/YYY/ZZZ
+./install.sh                 # interactive
+./install.sh --no-sample     # only the autoheal service, no sample nginx
+```
+
+If you prefer to drive compose yourself:
+
+```bash
+cp .env.example .env         # then edit .env and set BAH_SLACK_WEBHOOK_URL
 docker compose -f docker-compose.example.yml up --build
 ```
 
