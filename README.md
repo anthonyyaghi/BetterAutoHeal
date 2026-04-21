@@ -9,23 +9,14 @@ Docker container watchdog inspired by [`willfarrell/docker-autoheal`](https://gi
 
 ## Quick start
 
-The bundled `install.sh` has two modes.
-
-### Demo — bundled example stack (BAH + a sample nginx)
-
-```bash
-./install.sh demo                 # or just: ./install.sh (it will prompt)
-./install.sh demo --no-sample     # only the autoheal service, skip the demo nginx
-```
-
-It checks prerequisites, seeds `.env` from `.env.example`, prompts for your Slack webhook and (optional) project name, builds the image, and starts the stack.
+The bundled `install.sh` has two modes. **Default is `integrate`** — attaching BetterAutoHeal to your existing compose stack. `demo` brings up a bundled example instead.
 
 ### Integrate — add BetterAutoHeal to an existing compose file
 
 Point the installer at your own `docker-compose.yml` and pick which services it should watch. It generates a non-destructive overlay (`docker-compose.betterautoheal.yml`) next to your file — your original is not touched.
 
 ```bash
-./install.sh integrate \
+./install.sh \
   --compose-file /path/to/your/docker-compose.yml \
   --services homeassistant,grafana \
   --project-name "Home Server"
@@ -47,6 +38,15 @@ docker compose -f docker-compose.yml -f docker-compose.betterautoheal.yml up -d
 ```
 
 **Important**: each monitored service still needs its own `healthcheck:`. BetterAutoHeal only acts on containers Docker reports as `unhealthy`, so an unhealthchecked service is invisible to it.
+
+### Demo — bundled example stack (BAH + a sample nginx)
+
+```bash
+./install.sh demo                 # explicit demo mode
+./install.sh demo --no-sample     # only the autoheal service, skip the demo nginx
+```
+
+Seeds `.env` from `.env.example`, prompts for your Slack webhook and (optional) project name, builds the image, and starts the stack.
 
 ### Providing the Slack webhook URL
 

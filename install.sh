@@ -2,19 +2,19 @@
 #
 # install.sh — local installer for BetterAutoHeal.
 #
-# Two modes:
+# Two modes (default is `integrate`):
 #
-#   demo      Bring up the bundled docker-compose.example.yml (BAH + a sample nginx).
 #   integrate Generate a docker-compose.betterautoheal.yml overlay next to an
 #             existing compose file, labelling the selected services so
 #             BetterAutoHeal monitors them. Nothing in your original file is touched.
+#   demo      Bring up the bundled docker-compose.example.yml (BAH + a sample nginx).
 #
 # Usage:
-#   ./install.sh                                   # interactive; asks which mode
+#   ./install.sh                                   # interactive; integrate by default
+#   ./install.sh --compose-file PATH \
+#                [--services s1,s2] \
+#                [--project-name "My Stack"]       # same, non-interactive
 #   ./install.sh demo [--no-sample]                # bundled example
-#   ./install.sh integrate --compose-file PATH \
-#                          [--services s1,s2] \
-#                          [--project-name "My Stack"]
 #   ./install.sh -h
 #
 # The integrate mode writes two files next to the target compose file:
@@ -294,8 +294,8 @@ SERVICES=""
 PROJECT_NAME=""
 
 if [[ $# -eq 0 && -t 0 ]]; then
-  MODE="$(prompt_if_tty "Mode — [demo] bundled example, [integrate] existing compose file: ")"
-  MODE="${MODE:-demo}"
+  MODE="$(prompt_if_tty "Mode — [integrate] existing compose file (default), [demo] bundled example: ")"
+  MODE="${MODE:-integrate}"
 fi
 
 while [[ $# -gt 0 ]]; do
@@ -313,8 +313,8 @@ done
 export COMPOSE_FILE SERVICES PROJECT_NAME
 check_prereqs
 
-case "${MODE:-demo}" in
+case "${MODE:-integrate}" in
   demo)      run_demo "$NO_SAMPLE" ;;
   integrate) run_integrate ;;
-  *)         die "unknown mode: $MODE (use demo or integrate)" ;;
+  *)         die "unknown mode: $MODE (use integrate or demo)" ;;
 esac
