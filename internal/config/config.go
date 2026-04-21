@@ -33,6 +33,7 @@ type Config struct {
 	NotifyEnabled   bool
 	LogLevel        string
 	NotifyCooldown  time.Duration
+	ProjectName     string
 }
 
 func Load() (Config, error) {
@@ -48,6 +49,7 @@ func Load() (Config, error) {
 		NotifyEnabled:   boolEnv("BAH_NOTIFY", true),
 		LogLevel:        stringEnv("BAH_LOG_LEVEL", "info"),
 		NotifyCooldown:  durationEnv("BAH_NOTIFY_COOLDOWN", 30*time.Second),
+		ProjectName:     strings.TrimSpace(os.Getenv("BAH_PROJECT_NAME")),
 	}
 	if c.DefaultMode != ModeRestart && c.DefaultMode != ModeCompose {
 		return c, fmt.Errorf("BAH_DEFAULT_MODE must be %q or %q, got %q", ModeRestart, ModeCompose, c.DefaultMode)

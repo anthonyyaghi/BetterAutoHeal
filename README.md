@@ -9,21 +9,44 @@ Docker container watchdog inspired by [`willfarrell/docker-autoheal`](https://gi
 
 ## Quick start
 
-The fastest path is the bundled installer — it checks prerequisites, creates a `.env` from `.env.example`, prompts for your Slack webhook, builds the image, and brings up the example stack:
+The bundled `install.sh` has two modes.
+
+### Demo — bundled example stack (BAH + a sample nginx)
 
 ```bash
-./install.sh                 # interactive
-./install.sh --no-sample     # only the autoheal service, no sample nginx
+./install.sh demo                 # or just: ./install.sh (it will prompt)
+./install.sh demo --no-sample     # only the autoheal service, skip the demo nginx
 ```
 
-If you prefer to drive compose yourself:
+It checks prerequisites, seeds `.env` from `.env.example`, prompts for your Slack webhook and (optional) project name, builds the image, and starts the stack.
+
+### Integrate — add BetterAutoHeal to an existing compose file
+
+Point the installer at your own `docker-compose.yml` and pick which services it should watch. It generates a non-destructive overlay (`docker-compose.betterautoheal.yml`) next to your file — your original is not touched.
 
 ```bash
-cp .env.example .env         # then edit .env and set BAH_SLACK_WEBHOOK_URL
-docker compose -f docker-compose.example.yml up --build
+./install.sh integrate \
+  --compose-file /path/to/your/docker-compose.yml \
+  --services homeassistant,grafana \
+  --project-name "Home Server"
 ```
 
-The example stack includes BetterAutoHeal plus a sample `nginx` service with a healthcheck and the opt-in label.
+Or run it with no flags and it walks you through it interactively:
+- enumerates services from your compose file
+- asks which ones to monitor (blank = all)
+- asks for a project name used in Slack headers
+- asks for the Slack webhook (once; stored in `.env` next to your compose file)
+
+After it runs you'll have two new files next to your compose file:
+- `docker-compose.betterautoheal.yml` — overlay with the `betterautoheal` service + per-service labels
+- `.env` — the `BAH_*` config (gitignore it!)
+
+From then on, bring your stack up with:
+```bash
+docker compose -f docker-compose.yml -f docker-compose.betterautoheal.yml up -d
+```
+
+**Important**: each monitored service still needs its own `healthcheck:`. BetterAutoHeal only acts on containers Docker reports as `unhealthy`, so an unhealthchecked service is invisible to it.
 
 ### Providing the Slack webhook URL
 
@@ -68,6 +91,7 @@ Containers without `betterautoheal.enable=true` are ignored.
 | `BAH_SLACK_USERNAME` | `BetterAutoHeal` | Display name in Slack |
 | `BAH_NOTIFY_COOLDOWN` | `30s` | Minimum gap between detection notifications for the same container (anti-spam) |
 | `BAH_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
+| `BAH_PROJECT_NAME` | *(empty)* | Friendly label prefixed onto every Slack header, e.g. `[Home Server] Unhealthy: …` |
 
 ## Compose-mode requirements
 

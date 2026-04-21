@@ -53,6 +53,21 @@ func TestLoadDefaults(t *testing.T) {
 	if c.LogLines != 100 {
 		t.Fatalf("LogLines = %d, want 100", c.LogLines)
 	}
+	if c.ProjectName != "" {
+		t.Fatalf("ProjectName = %q, want empty", c.ProjectName)
+	}
+}
+
+func TestLoadProjectNameTrimmed(t *testing.T) {
+	t.Setenv("BAH_NOTIFY", "false")
+	t.Setenv("BAH_PROJECT_NAME", "  Home Server  ")
+	c, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if c.ProjectName != "Home Server" {
+		t.Fatalf("ProjectName = %q, want %q", c.ProjectName, "Home Server")
+	}
 }
 
 func TestLoadRequiresWebhookWhenNotifying(t *testing.T) {

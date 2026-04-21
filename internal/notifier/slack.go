@@ -22,6 +22,7 @@ type Event struct {
 	Mode          string
 	Project       string
 	Service       string
+	ProjectName   string // optional friendly name (BAH_PROJECT_NAME)
 	Logs          string // already truncated by caller if desired
 	Outcome       string // "detected", "revived", "failed"
 	Err           error
@@ -79,6 +80,9 @@ func buildPayload(username string, e Event) map[string]any {
 	case "failed":
 		icon = ":x:"
 		headerText = fmt.Sprintf("Revive failed: %s", e.ContainerName)
+	}
+	if e.ProjectName != "" {
+		headerText = fmt.Sprintf("[%s] %s", e.ProjectName, headerText)
 	}
 
 	short := e.ContainerID

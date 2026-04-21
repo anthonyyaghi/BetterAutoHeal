@@ -50,6 +50,23 @@ func TestBuildPayloadIncludesLogsAndFields(t *testing.T) {
 	}
 }
 
+func TestBuildPayloadIncludesProjectNamePrefix(t *testing.T) {
+	e := Event{
+		ContainerName: "web",
+		ContainerID:   "abcdef1234567890",
+		Mode:          "compose",
+		ProjectName:   "Home Server",
+		Outcome:       "detected",
+		Timestamp:     time.Now(),
+	}
+	p := buildPayload("BetterAutoHeal", e)
+	b, _ := json.Marshal(p)
+	s := string(b)
+	if !strings.Contains(s, "[Home Server] Unhealthy: web") {
+		t.Fatalf("expected project name prefix in header, got %s", s)
+	}
+}
+
 func TestNotifyPostsToWebhook(t *testing.T) {
 	var got string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
