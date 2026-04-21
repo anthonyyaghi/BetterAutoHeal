@@ -9,7 +9,6 @@ import (
 // can decide whether it's stuck in a crash loop.
 type loopHistory struct {
 	lastRestartCount int
-	seeded           bool // true after the first observation — first delta is discarded
 	restartTimes     []time.Time
 	lastNotify       time.Time
 }
@@ -24,23 +23,35 @@ func newLoopTracker() *loopTracker {
 	return &loopTracker{hist: make(map[string]*loopHistory)}
 }
 
+// ObserveResult describes what Observe saw on a single poll for one container.
+type ObserveResult struct {
+	// Baseline is true on the first observation for a container ID: the current
+	// RestartCount is stored as a reference point and never counts as a restart.
+	Baseline bool
+	// Delta is the number of restarts observed since the previous observation
+	// (0 on baseline; can be > 1 if several restarts happened between polls).
+	Delta int
+	// WindowCount is the number of restart timestamps currently inside the
+	// sliding window after any pruning.
+	WindowCount int
+	// Triggered is true when WindowCount has reached the threshold and the
+	// per-container cooldown has elapsed; fires at most once per cooldown.
+	Triggered bool
+	// CooldownSuppressed is true when the threshold was met but the cooldown
+	// is still active, so no trigger fired.
+	CooldownSuppressed bool
+}
+
 // Observe records the current restart count for a container at time `now` and
-// returns (triggered, windowCount) indicating whether the loop threshold was
-// crossed. A trigger is suppressed until the cooldown elapses.
-func (t *loopTracker) Observe(id string, restartCount int, now time.Time, threshold int, window, cooldown time.Duration) (triggered bool, windowCount int) {
+// returns what it saw and whether the threshold fired.
+func (t *loopTracker) Observe(id string, restartCount int, now time.Time, threshold int, window, cooldown time.Duration) ObserveResult {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
 	h, ok := t.hist[id]
 	if !ok {
-		h = &loopHistory{lastRestartCount: restartCount, seeded: true}
-		t.hist[id] = h
-		return false, 0
-	}
-	if !h.seeded {
-		h.lastRestartCount = restartCount
-		h.seeded = true
-		return false, 0
+		t.hist[id] = &loopHistory{lastRestartCount: restartCount}
+		return ObserveResult{Baseline: true}
 	}
 
 	delta := restartCount - h.lastRestartCount
@@ -48,7 +59,8 @@ func (t *loopTracker) Observe(id string, restartCount int, now time.Time, thresh
 	if delta < 0 {
 		// Container recreated — Docker resets RestartCount. Clear the history.
 		h.restartTimes = h.restartTimes[:0]
-	} else {
+		delta = 0
+	} else if delta > 0 {
 		for i := 0; i < delta; i++ {
 			h.restartTimes = append(h.restartTimes, now)
 		}
@@ -64,15 +76,20 @@ func (t *loopTracker) Observe(id string, restartCount int, now time.Time, thresh
 	}
 	h.restartTimes = pruned
 
-	windowCount = len(h.restartTimes)
-	if windowCount < threshold {
-		return false, windowCount
+	res := ObserveResult{
+		Delta:       delta,
+		WindowCount: len(h.restartTimes),
+	}
+	if res.WindowCount < threshold {
+		return res
 	}
 	if !h.lastNotify.IsZero() && now.Sub(h.lastNotify) < cooldown {
-		return false, windowCount
+		res.CooldownSuppressed = true
+		return res
 	}
 	h.lastNotify = now
-	return true, windowCount
+	res.Triggered = true
+	return res
 }
 
 // Forget drops the tracked history for a container (useful on removal/rename).

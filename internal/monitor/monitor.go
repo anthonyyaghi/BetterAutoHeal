@@ -59,6 +59,10 @@ func (m *Monitor) Run(ctx context.Context) error {
 		"interval", m.cfg.Interval,
 		"label_filter", m.cfg.LabelFilter,
 		"default_mode", m.cfg.DefaultMode,
+		"loop_detection", m.cfg.LoopDetection,
+		"loop_threshold", m.cfg.LoopThreshold,
+		"loop_window", m.cfg.LoopWindow,
+		"loop_cooldown", m.cfg.LoopCooldown,
 	)
 
 	// Run a tick immediately so we don't wait the interval on startup.
@@ -119,13 +123,40 @@ func (m *Monitor) checkLoop(ctx context.Context, c types.Container) {
 	if insp.ContainerJSONBase == nil {
 		return
 	}
-	now := time.Now()
-	triggered, count := m.loops.Observe(c.ID, insp.RestartCount, now,
+	name := containerDisplayName(c)
+	shortID := c.ID
+	if len(shortID) > 12 {
+		shortID = shortID[:12]
+	}
+	res := m.loops.Observe(c.ID, insp.RestartCount, time.Now(),
 		m.cfg.LoopThreshold, m.cfg.LoopWindow, m.cfg.LoopCooldown)
-	if !triggered {
+
+	switch {
+	case res.Baseline:
+		m.log.Info("loop tracker baseline",
+			"container", name, "id", shortID,
+			"restart_count", insp.RestartCount,
+			"threshold", m.cfg.LoopThreshold,
+			"window", m.cfg.LoopWindow,
+		)
+	case res.Delta > 0:
+		m.log.Info("loop tracker increment",
+			"container", name, "id", shortID,
+			"delta", res.Delta,
+			"count_in_window", res.WindowCount,
+			"threshold", m.cfg.LoopThreshold,
+		)
+	}
+	if res.CooldownSuppressed {
+		m.log.Debug("loop trigger suppressed (cooldown)",
+			"container", name, "count_in_window", res.WindowCount,
+			"cooldown", m.cfg.LoopCooldown,
+		)
+	}
+	if !res.Triggered {
 		return
 	}
-	go m.handleLoop(ctx, c, count)
+	go m.handleLoop(ctx, c, res.WindowCount)
 }
 
 func (m *Monitor) handleLoop(ctx context.Context, c types.Container, windowCount int) {
