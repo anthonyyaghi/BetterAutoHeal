@@ -15,10 +15,19 @@ const (
 	ModeCompose Mode = "compose"
 )
 
+type LoopAction string
+
 const (
-	LabelEnable   = "betterautoheal.enable"
-	LabelMode     = "betterautoheal.mode"
-	LabelLogLines = "betterautoheal.log_lines"
+	LoopActionNotify LoopAction = "notify"
+	LoopActionStop   LoopAction = "stop"
+	LoopActionIgnore LoopAction = "ignore"
+)
+
+const (
+	LabelEnable     = "betterautoheal.enable"
+	LabelMode       = "betterautoheal.mode"
+	LabelLogLines   = "betterautoheal.log_lines"
+	LabelLoopAction = "betterautoheal.loop_action"
 )
 
 type Config struct {
@@ -34,6 +43,11 @@ type Config struct {
 	LogLevel        string
 	NotifyCooldown  time.Duration
 	ProjectName     string
+
+	LoopDetection bool
+	LoopThreshold int
+	LoopWindow    time.Duration
+	LoopCooldown  time.Duration
 }
 
 func Load() (Config, error) {
@@ -50,6 +64,11 @@ func Load() (Config, error) {
 		LogLevel:        stringEnv("BAH_LOG_LEVEL", "info"),
 		NotifyCooldown:  durationEnv("BAH_NOTIFY_COOLDOWN", 30*time.Second),
 		ProjectName:     strings.TrimSpace(os.Getenv("BAH_PROJECT_NAME")),
+
+		LoopDetection: boolEnv("BAH_LOOP_DETECTION", true),
+		LoopThreshold: intEnv("BAH_LOOP_THRESHOLD", 3),
+		LoopWindow:    durationEnv("BAH_LOOP_WINDOW", 2*time.Minute),
+		LoopCooldown:  durationEnv("BAH_LOOP_COOLDOWN", 15*time.Minute),
 	}
 	if c.DefaultMode != ModeRestart && c.DefaultMode != ModeCompose {
 		return c, fmt.Errorf("BAH_DEFAULT_MODE must be %q or %q, got %q", ModeRestart, ModeCompose, c.DefaultMode)
@@ -59,6 +78,12 @@ func Load() (Config, error) {
 	}
 	if !strings.Contains(c.LabelFilter, "=") {
 		return c, fmt.Errorf("BAH_LABEL_FILTER must be of form key=value, got %q", c.LabelFilter)
+	}
+	if c.LoopThreshold < 2 {
+		return c, fmt.Errorf("BAH_LOOP_THRESHOLD must be >= 2, got %d", c.LoopThreshold)
+	}
+	if c.LoopWindow <= 0 {
+		return c, fmt.Errorf("BAH_LOOP_WINDOW must be positive, got %s", c.LoopWindow)
 	}
 	return c, nil
 }
@@ -116,4 +141,16 @@ func ResolveLogLines(labels map[string]string, def int) int {
 		}
 	}
 	return def
+}
+
+// ResolveLoopAction returns the container's loop_action label or the default (notify).
+func ResolveLoopAction(labels map[string]string) LoopAction {
+	if v, ok := labels[LabelLoopAction]; ok {
+		a := LoopAction(strings.ToLower(strings.TrimSpace(v)))
+		switch a {
+		case LoopActionNotify, LoopActionStop, LoopActionIgnore:
+			return a
+		}
+	}
+	return LoopActionNotify
 }

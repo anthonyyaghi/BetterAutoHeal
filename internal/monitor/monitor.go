@@ -32,6 +32,8 @@ type Monitor struct {
 	mu        sync.Mutex
 	inFlight  map[string]struct{}
 	lastNotif map[string]time.Time
+
+	loops *loopTracker
 }
 
 func New(cfg config.Config, d *docker.Client, s *notifier.Slack, r *reviver.Restart, co *reviver.Compose, log *slog.Logger) *Monitor {
@@ -44,6 +46,7 @@ func New(cfg config.Config, d *docker.Client, s *notifier.Slack, r *reviver.Rest
 		log:       log,
 		inFlight:  make(map[string]struct{}),
 		lastNotif: make(map[string]time.Time),
+		loops:     newLoopTracker(),
 	}
 }
 
@@ -83,11 +86,101 @@ func (m *Monitor) tick(ctx context.Context) {
 		return
 	}
 
+	seen := make(map[string]struct{}, len(containers))
 	for _, c := range containers {
 		c := c
+		seen[c.ID] = struct{}{}
+		if m.cfg.LoopDetection {
+			m.checkLoop(ctx, c)
+		}
 		if m.shouldHandle(ctx, c) {
 			go m.handle(ctx, c)
 		}
+	}
+	// Drop history for containers that no longer exist (recreated / removed).
+	m.loops.mu.Lock()
+	for id := range m.loops.hist {
+		if _, ok := seen[id]; !ok {
+			delete(m.loops.hist, id)
+		}
+	}
+	m.loops.mu.Unlock()
+}
+
+func (m *Monitor) checkLoop(ctx context.Context, c types.Container) {
+	if config.ResolveLoopAction(c.Labels) == config.LoopActionIgnore {
+		return
+	}
+	insp, err := m.docker.Inspect(ctx, c.ID)
+	if err != nil {
+		m.log.Warn("inspect for loop-check failed", "id", c.ID, "err", err)
+		return
+	}
+	if insp.ContainerJSONBase == nil {
+		return
+	}
+	now := time.Now()
+	triggered, count := m.loops.Observe(c.ID, insp.RestartCount, now,
+		m.cfg.LoopThreshold, m.cfg.LoopWindow, m.cfg.LoopCooldown)
+	if !triggered {
+		return
+	}
+	go m.handleLoop(ctx, c, count)
+}
+
+func (m *Monitor) handleLoop(ctx context.Context, c types.Container, windowCount int) {
+	name := containerDisplayName(c)
+	action := config.ResolveLoopAction(c.Labels)
+	logLines := config.ResolveLogLines(c.Labels, m.cfg.LogLines)
+
+	m.log.Warn("restart loop detected",
+		"container", name, "id", c.ID,
+		"restarts_in_window", windowCount, "window", m.cfg.LoopWindow,
+		"action", action,
+	)
+
+	logs, err := m.docker.TailLogs(ctx, c.ID, logLines)
+	if err != nil {
+		logs = "(log capture failed: " + err.Error() + ")"
+	}
+
+	m.notify(ctx, notifier.Event{
+		ContainerName: name,
+		ContainerID:   c.ID,
+		Mode:          "loop",
+		Project:       c.Labels[composeProjectLabel],
+		Service:       c.Labels[composeServiceLabel],
+		ProjectName:   m.cfg.ProjectName,
+		Logs:          logs,
+		Outcome:       "loop_detected",
+		RestartsInWindow: windowCount,
+		LoopWindow:       m.cfg.LoopWindow,
+		Timestamp:        time.Now(),
+	})
+
+	if action == config.LoopActionStop {
+		if err := m.docker.Stop(ctx, c.ID, m.cfg.StopTimeout); err != nil {
+			m.log.Error("stop after loop detection failed", "container", name, "err", err)
+			m.notify(ctx, notifier.Event{
+				ContainerName: name,
+				ContainerID:   c.ID,
+				Mode:          "loop",
+				ProjectName:   m.cfg.ProjectName,
+				Outcome:       "loop_stop_failed",
+				Err:           err,
+				Timestamp:     time.Now(),
+			})
+			return
+		}
+		m.log.Warn("stopped looping container", "container", name)
+		m.notify(ctx, notifier.Event{
+			ContainerName: name,
+			ContainerID:   c.ID,
+			Mode:          "loop",
+			ProjectName:   m.cfg.ProjectName,
+			Outcome:       "loop_stopped",
+			Timestamp:     time.Now(),
+		})
 	}
 }
 
@@ -97,7 +190,10 @@ func (m *Monitor) shouldHandle(ctx context.Context, c types.Container) bool {
 		m.log.Warn("inspect failed", "id", c.ID, "err", err)
 		return false
 	}
-	if insp.State == nil || insp.State.Health == nil {
+	if insp.State == nil || !insp.State.Running {
+		return false
+	}
+	if insp.State.Health == nil {
 		return false
 	}
 	if insp.State.Health.Status != types.Unhealthy {

@@ -34,11 +34,19 @@ func (c *Client) Ping(ctx context.Context) error {
 	return err
 }
 
-// ListByLabel returns all running containers carrying labelKey=labelValue.
+// ListByLabel returns all containers (including stopped/restarting) carrying labelKey=labelValue.
+// The monitor filters to running-and-unhealthy for the revival path, and consults
+// stopped/restarting entries for loop detection.
 func (c *Client) ListByLabel(ctx context.Context, labelKey, labelValue string) ([]types.Container, error) {
 	args := filters.NewArgs()
 	args.Add("label", fmt.Sprintf("%s=%s", labelKey, labelValue))
-	return c.cli.ContainerList(ctx, container.ListOptions{Filters: args})
+	return c.cli.ContainerList(ctx, container.ListOptions{All: true, Filters: args})
+}
+
+// Stop stops a container with the given timeout (seconds).
+func (c *Client) Stop(ctx context.Context, id string, stopTimeoutSec int) error {
+	t := stopTimeoutSec
+	return c.cli.ContainerStop(ctx, id, container.StopOptions{Timeout: &t})
 }
 
 // Inspect returns full inspect data, including health status.

@@ -17,16 +17,18 @@ const (
 )
 
 type Event struct {
-	ContainerName string
-	ContainerID   string
-	Mode          string
-	Project       string
-	Service       string
-	ProjectName   string // optional friendly name (BAH_PROJECT_NAME)
-	Logs          string // already truncated by caller if desired
-	Outcome       string // "detected", "revived", "failed"
-	Err           error
-	Timestamp     time.Time
+	ContainerName    string
+	ContainerID      string
+	Mode             string
+	Project          string
+	Service          string
+	ProjectName      string // optional friendly name (BAH_PROJECT_NAME)
+	Logs             string // already truncated by caller if desired
+	Outcome          string // "detected", "revived", "failed", "loop_detected", "loop_stopped", "loop_stop_failed"
+	Err              error
+	RestartsInWindow int           // only set for loop_* outcomes
+	LoopWindow       time.Duration // only set for loop_* outcomes
+	Timestamp        time.Time
 }
 
 type Slack struct {
@@ -80,6 +82,19 @@ func buildPayload(username string, e Event) map[string]any {
 	case "failed":
 		icon = ":x:"
 		headerText = fmt.Sprintf("Revive failed: %s", e.ContainerName)
+	case "loop_detected":
+		icon = ":recycle:"
+		headerText = fmt.Sprintf("Restart loop: %s", e.ContainerName)
+		if e.RestartsInWindow > 0 && e.LoopWindow > 0 {
+			headerText = fmt.Sprintf("Restart loop: %s (%d× in %s)",
+				e.ContainerName, e.RestartsInWindow, e.LoopWindow)
+		}
+	case "loop_stopped":
+		icon = ":octagonal_sign:"
+		headerText = fmt.Sprintf("Stopped looping container: %s", e.ContainerName)
+	case "loop_stop_failed":
+		icon = ":x:"
+		headerText = fmt.Sprintf("Failed to stop looping container: %s", e.ContainerName)
 	}
 	if e.ProjectName != "" {
 		headerText = fmt.Sprintf("[%s] %s", e.ProjectName, headerText)

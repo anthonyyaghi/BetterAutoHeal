@@ -1,11 +1,12 @@
 # BetterAutoHeal
 
-Docker container watchdog inspired by [`willfarrell/docker-autoheal`](https://github.com/willfarrell/docker-autoheal). Polls the Docker API for containers reporting an `unhealthy` healthcheck and revives them — with two extras over the original:
+Docker container watchdog inspired by [`willfarrell/docker-autoheal`](https://github.com/willfarrell/docker-autoheal). Polls the Docker API for containers reporting an `unhealthy` healthcheck and revives them — with three extras over the original:
 
 1. **Two revive modes**, selectable per container via label:
    - `restart` — `docker restart` (the original behavior)
    - `compose` — `docker compose stop <svc> && docker compose start <svc>` for cleaner lifecycles on compose-managed services
 2. **Slack notifications** with a tail of the container's logs *captured before* the revival, so the failing state is preserved even after the container restarts.
+3. **Restart-loop detection** — spots the other failure mode (container keeps exiting and Docker's `restart:` policy keeps bringing it back) and alerts you, with the option to auto-stop the looping container.
 
 ## Quick start
 
@@ -67,6 +68,7 @@ labels:
   - betterautoheal.enable=true       # required: opt-in
   - betterautoheal.mode=compose      # optional: restart (default) or compose
   - betterautoheal.log_lines=200     # optional: override BAH_LOG_LINES
+  - betterautoheal.loop_action=stop  # optional: notify (default) | stop | ignore
 healthcheck:
   test: ["CMD", "curl", "-f", "http://localhost/health"]
   interval: 10s
@@ -75,6 +77,20 @@ healthcheck:
 ```
 
 Containers without `betterautoheal.enable=true` are ignored.
+
+## Restart-loop detection
+
+Docker's own `restart:` policy silently keeps a crashing container in a loop. BAH watches each opted-in container's `RestartCount` and, if it grows by `BAH_LOOP_THRESHOLD` (default 3) within `BAH_LOOP_WINDOW` (default 2m), posts a `:recycle: Restart loop: <name>` message to Slack with the last N log lines so you can see *why* it's crashing.
+
+Per-container behavior via `betterautoheal.loop_action`:
+
+| Value | Effect |
+|-------|--------|
+| `notify` *(default)* | Slack alert, then leave Docker's restart policy alone |
+| `stop` | Slack alert, then `docker stop` the container to break the loop |
+| `ignore` | No loop detection for this container (useful for services you bounce deliberately) |
+
+Cooldown is enforced per container (`BAH_LOOP_COOLDOWN`, default 15m) so a persistent loop doesn't spam the channel. BAH can't *fix* a crash loop — it can only alert. The fix is in your container's config or code.
 
 ## Configuration (env vars)
 
@@ -92,6 +108,10 @@ Containers without `betterautoheal.enable=true` are ignored.
 | `BAH_NOTIFY_COOLDOWN` | `30s` | Minimum gap between detection notifications for the same container (anti-spam) |
 | `BAH_LOG_LEVEL` | `info` | `debug`, `info`, `warn`, or `error` |
 | `BAH_PROJECT_NAME` | *(empty)* | Friendly label prefixed onto every Slack header, e.g. `[Home Server] Unhealthy: …` |
+| `BAH_LOOP_DETECTION` | `true` | Master switch for restart-loop detection |
+| `BAH_LOOP_THRESHOLD` | `3` | Number of restarts within the window to trigger an alert |
+| `BAH_LOOP_WINDOW` | `2m` | Time window over which restarts are counted |
+| `BAH_LOOP_COOLDOWN` | `15m` | Minimum gap between loop alerts for the same container |
 
 ## Compose-mode requirements
 
