@@ -95,6 +95,12 @@ func buildPayload(username string, e Event) map[string]any {
 	case "loop_stop_failed":
 		icon = ":x:"
 		headerText = fmt.Sprintf("Failed to stop looping container: %s", e.ContainerName)
+	case "loop_recreated":
+		icon = ":arrows_counterclockwise:"
+		headerText = fmt.Sprintf("Recreated looping container: %s", e.ContainerName)
+	case "loop_recreate_failed":
+		icon = ":x:"
+		headerText = fmt.Sprintf("Failed to recreate looping container: %s", e.ContainerName)
 	}
 	if e.ProjectName != "" {
 		headerText = fmt.Sprintf("[%s] %s", e.ProjectName, headerText)

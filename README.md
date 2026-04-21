@@ -68,7 +68,7 @@ labels:
   - betterautoheal.enable=true       # required: opt-in
   - betterautoheal.mode=compose      # optional: restart (default) or compose
   - betterautoheal.log_lines=200     # optional: override BAH_LOG_LINES
-  - betterautoheal.loop_action=stop  # optional: notify (default) | stop | ignore
+  - betterautoheal.loop_action=stop  # optional: recreate (default) | stop | notify | ignore
 healthcheck:
   test: ["CMD", "curl", "-f", "http://localhost/health"]
   interval: 10s
@@ -80,17 +80,20 @@ Containers without `betterautoheal.enable=true` are ignored.
 
 ## Restart-loop detection
 
-Docker's own `restart:` policy silently keeps a crashing container in a loop. BAH watches each opted-in container's `RestartCount` and, if it grows by `BAH_LOOP_THRESHOLD` (default 3) within `BAH_LOOP_WINDOW` (default 2m), posts a `:recycle: Restart loop: <name>` message to Slack with the last N log lines so you can see *why* it's crashing.
+Docker's own `restart:` policy silently keeps a crashing container in a loop. BAH watches each opted-in container's `RestartCount` and, if it grows by `BAH_LOOP_THRESHOLD` (default 3) within `BAH_LOOP_WINDOW` (default 2m), it posts a `:recycle: Restart loop: <name>` Slack message with the last N log lines and then acts on the container.
 
 Per-container behavior via `betterautoheal.loop_action`:
 
 | Value | Effect |
 |-------|--------|
-| `notify` *(default)* | Slack alert, then leave Docker's restart policy alone |
-| `stop` | Slack alert, then `docker stop` the container to break the loop |
-| `ignore` | No loop detection for this container (useful for services you bounce deliberately) |
+| `recreate` *(default)* | Slack alert, then `docker compose up -d --force-recreate --no-deps <svc>` — the single-service equivalent of `docker compose down && up -d`. Resets `RestartCount` to 0 and often clears transient bad state. Requires compose labels on the container; falls back to notify-only otherwise. |
+| `stop` | Slack alert, then `docker stop` the container. Use when a looping service is worse than a down one. |
+| `notify` | Slack alert only; Docker's restart policy keeps retrying. Use for transient failures that are expected to self-heal. |
+| `ignore` | No loop detection for this container. Use for services you bounce deliberately. |
 
-Cooldown is enforced per container (`BAH_LOOP_COOLDOWN`, default 15m) so a persistent loop doesn't spam the channel. BAH can't *fix* a crash loop — it can only alert. The fix is in your container's config or code.
+Cooldown is enforced per container (`BAH_LOOP_COOLDOWN`, default 15m) so a persistent loop doesn't spam the channel or re-recreate on every failed cycle. After a recreate, BAH forgets the container's history — the freshly created container starts with a clean baseline.
+
+BAH can't *fix* a crash loop permanently — if the bug is deterministic, the recreated container will loop again after the cooldown. The alert is what actually matters: it tells you to go look at the logs and fix the root cause.
 
 ## Configuration (env vars)
 

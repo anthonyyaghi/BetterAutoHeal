@@ -133,10 +133,29 @@ func (m *Monitor) handleLoop(ctx context.Context, c types.Container, windowCount
 	action := config.ResolveLoopAction(c.Labels)
 	logLines := config.ResolveLogLines(c.Labels, m.cfg.LogLines)
 
+	info := reviver.ContainerInfo{
+		ID:                c.ID,
+		Name:              name,
+		Labels:            c.Labels,
+		ComposeProject:    c.Labels[composeProjectLabel],
+		ComposeService:    c.Labels[composeServiceLabel],
+		ComposeWorkingDir: c.Labels[composeWorkingDirLabel],
+	}
+
+	// recreate requires compose labels; degrade gracefully when they're missing.
+	effective := action
+	if effective == config.LoopActionRecreate {
+		if info.ComposeProject == "" || info.ComposeService == "" || info.ComposeWorkingDir == "" {
+			m.log.Warn("recreate requires compose labels; falling back to notify-only",
+				"container", name)
+			effective = config.LoopActionNotify
+		}
+	}
+
 	m.log.Warn("restart loop detected",
 		"container", name, "id", c.ID,
 		"restarts_in_window", windowCount, "window", m.cfg.LoopWindow,
-		"action", action,
+		"action", action, "effective", effective,
 	)
 
 	logs, err := m.docker.TailLogs(ctx, c.ID, logLines)
@@ -145,20 +164,21 @@ func (m *Monitor) handleLoop(ctx context.Context, c types.Container, windowCount
 	}
 
 	m.notify(ctx, notifier.Event{
-		ContainerName: name,
-		ContainerID:   c.ID,
-		Mode:          "loop",
-		Project:       c.Labels[composeProjectLabel],
-		Service:       c.Labels[composeServiceLabel],
-		ProjectName:   m.cfg.ProjectName,
-		Logs:          logs,
-		Outcome:       "loop_detected",
+		ContainerName:    name,
+		ContainerID:      c.ID,
+		Mode:             "loop",
+		Project:          info.ComposeProject,
+		Service:          info.ComposeService,
+		ProjectName:      m.cfg.ProjectName,
+		Logs:             logs,
+		Outcome:          "loop_detected",
 		RestartsInWindow: windowCount,
 		LoopWindow:       m.cfg.LoopWindow,
 		Timestamp:        time.Now(),
 	})
 
-	if action == config.LoopActionStop {
+	switch effective {
+	case config.LoopActionStop:
 		if err := m.docker.Stop(ctx, c.ID, m.cfg.StopTimeout); err != nil {
 			m.log.Error("stop after loop detection failed", "container", name, "err", err)
 			m.notify(ctx, notifier.Event{
@@ -181,6 +201,37 @@ func (m *Monitor) handleLoop(ctx context.Context, c types.Container, windowCount
 			Outcome:       "loop_stopped",
 			Timestamp:     time.Now(),
 		})
+	case config.LoopActionRecreate:
+		if err := m.compose.Recreate(ctx, info); err != nil {
+			m.log.Error("recreate after loop detection failed", "container", name, "err", err)
+			m.notify(ctx, notifier.Event{
+				ContainerName: name,
+				ContainerID:   c.ID,
+				Mode:          "loop",
+				Project:       info.ComposeProject,
+				Service:       info.ComposeService,
+				ProjectName:   m.cfg.ProjectName,
+				Outcome:       "loop_recreate_failed",
+				Err:           err,
+				Timestamp:     time.Now(),
+			})
+			return
+		}
+		m.log.Warn("recreated looping container", "container", name)
+		m.notify(ctx, notifier.Event{
+			ContainerName: name,
+			ContainerID:   c.ID,
+			Mode:          "loop",
+			Project:       info.ComposeProject,
+			Service:       info.ComposeService,
+			ProjectName:   m.cfg.ProjectName,
+			Outcome:       "loop_recreated",
+			Timestamp:     time.Now(),
+		})
+		// Old container is gone; drop its history so the fresh one gets a clean baseline.
+		m.loops.Forget(c.ID)
+	case config.LoopActionNotify:
+		// Alert already sent above.
 	}
 }
 

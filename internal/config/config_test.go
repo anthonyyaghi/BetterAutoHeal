@@ -77,3 +77,26 @@ func TestLoadRequiresWebhookWhenNotifying(t *testing.T) {
 		t.Fatal("expected error when notify=true and webhook empty")
 	}
 }
+
+func TestResolveLoopAction(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels map[string]string
+		want   LoopAction
+	}{
+		{"default is recreate", nil, LoopActionRecreate},
+		{"recreate label", map[string]string{LabelLoopAction: "recreate"}, LoopActionRecreate},
+		{"notify label", map[string]string{LabelLoopAction: "notify"}, LoopActionNotify},
+		{"stop label", map[string]string{LabelLoopAction: "stop"}, LoopActionStop},
+		{"ignore label", map[string]string{LabelLoopAction: "ignore"}, LoopActionIgnore},
+		{"unknown falls back to default", map[string]string{LabelLoopAction: "bogus"}, LoopActionRecreate},
+		{"trims and lowercases", map[string]string{LabelLoopAction: " STOP "}, LoopActionStop},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := ResolveLoopAction(tt.labels); got != tt.want {
+				t.Fatalf("ResolveLoopAction = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}

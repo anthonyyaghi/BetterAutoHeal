@@ -28,19 +28,36 @@ func NewCompose() *Compose {
 func (c *Compose) Mode() config.Mode { return config.ModeCompose }
 
 func (c *Compose) Revive(ctx context.Context, info ContainerInfo) error {
+	if err := c.requireLabels(info); err != nil {
+		return err
+	}
+	if err := c.run(ctx, info, "stop", info.ComposeService); err != nil {
+		return fmt.Errorf("compose stop: %w", err)
+	}
+	if err := c.run(ctx, info, "start", info.ComposeService); err != nil {
+		return fmt.Errorf("compose start: %w", err)
+	}
+	return nil
+}
+
+// Recreate tears down and re-creates just the specified service via
+// `docker compose up -d --force-recreate --no-deps <service>`. Equivalent to
+// a targeted `docker compose down && docker compose up -d` for a single service,
+// and resets the new container's RestartCount to 0.
+func (c *Compose) Recreate(ctx context.Context, info ContainerInfo) error {
+	if err := c.requireLabels(info); err != nil {
+		return err
+	}
+	return c.run(ctx, info, "up", "-d", "--force-recreate", "--no-deps", info.ComposeService)
+}
+
+func (c *Compose) requireLabels(info ContainerInfo) error {
 	if info.ComposeProject == "" || info.ComposeService == "" {
 		return fmt.Errorf("missing compose labels (project=%q service=%q); cannot use compose mode",
 			info.ComposeProject, info.ComposeService)
 	}
 	if info.ComposeWorkingDir == "" {
 		return fmt.Errorf("missing com.docker.compose.project.working_dir label; cannot locate compose file")
-	}
-
-	if err := c.run(ctx, info, "stop", info.ComposeService); err != nil {
-		return fmt.Errorf("compose stop: %w", err)
-	}
-	if err := c.run(ctx, info, "start", info.ComposeService); err != nil {
-		return fmt.Errorf("compose start: %w", err)
 	}
 	return nil
 }

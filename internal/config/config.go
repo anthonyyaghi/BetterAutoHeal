@@ -18,9 +18,10 @@ const (
 type LoopAction string
 
 const (
-	LoopActionNotify LoopAction = "notify"
-	LoopActionStop   LoopAction = "stop"
-	LoopActionIgnore LoopAction = "ignore"
+	LoopActionNotify   LoopAction = "notify"
+	LoopActionStop     LoopAction = "stop"
+	LoopActionRecreate LoopAction = "recreate"
+	LoopActionIgnore   LoopAction = "ignore"
 )
 
 const (
@@ -143,14 +144,15 @@ func ResolveLogLines(labels map[string]string, def int) int {
 	return def
 }
 
-// ResolveLoopAction returns the container's loop_action label or the default (notify).
+// ResolveLoopAction returns the container's loop_action label or the default (recreate).
+// Containers without compose labels will have recreate downgraded to notify at handle time.
 func ResolveLoopAction(labels map[string]string) LoopAction {
 	if v, ok := labels[LabelLoopAction]; ok {
 		a := LoopAction(strings.ToLower(strings.TrimSpace(v)))
 		switch a {
-		case LoopActionNotify, LoopActionStop, LoopActionIgnore:
+		case LoopActionNotify, LoopActionStop, LoopActionRecreate, LoopActionIgnore:
 			return a
 		}
 	}
-	return LoopActionNotify
+	return LoopActionRecreate
 }
